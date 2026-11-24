@@ -1,0 +1,25 @@
+{
+  "name": "wow-armory-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only MCP server for public World of Warcraft Retail character profiles",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "test:stdio": "npm run build && node --test test/stdio.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.4.0",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.3"
+  }
+}
