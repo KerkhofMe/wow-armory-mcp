@@ -19,3 +19,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Build and smoke-test the container
+        if: matrix.node == 24
+        run: |
+          docker build -t wow-armory-mcp:local .
+          node --test test/container-smoke.mjs

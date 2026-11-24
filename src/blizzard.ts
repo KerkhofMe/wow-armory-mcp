@@ -10,7 +10,7 @@ const regionLocales: Record<Region, string> = {
   tw: 'zh_TW',
 };
 
-export type Character = { region: Region; realm: string; name: string };
+export type Character = { region: Region; name: string; surname: string };
 
 type RequestKind = 'profile' | 'detail' | 'oauth';
 type ErrorCode =
@@ -49,17 +49,21 @@ export class BlizzardClient {
     private readonly now: () => number = Date.now,
   ) {}
 
-  async character({ region, realm, name }: Character, suffix = ''): Promise<unknown> {
+  async character({ region, name, surname }: Character, suffix = ''): Promise<unknown> {
+    const slug = encodeURIComponent(`${name}-${surname}`);
     const url = new URL(
-      `/profile/wow/character/${encodeURIComponent(realm)}/${encodeURIComponent(name)}${suffix}`,
+      `/profile/wow/character/${slug}${suffix}`,
       `https://${region}.api.blizzard.com`,
     );
-    url.searchParams.set('namespace', `profile-${region}`);
     url.searchParams.set('locale', regionLocales[region]);
     const kind = suffix ? 'detail' : 'profile';
     const token = await this.#getToken();
     const request = (value: string) => this.#send(url, kind, {
-      headers: { Authorization: `Bearer ${value}`, Accept: 'application/json' },
+      headers: {
+        Authorization: `Bearer ${value}`,
+        Accept: 'application/json',
+        'Battlenet-Namespace': `profile-forever-${region}`,
+      },
     });
 
     try {
@@ -152,7 +156,7 @@ function httpError({ status, headers }: Response, kind: RequestKind, now: number
     const subject = kind === 'profile' ? 'Character profile' : 'Character data';
     return new BlizzardError(
       'NOT_FOUND',
-      `${subject} not found. Check the region, realm slug, and name. Private or inactive profiles and missing activity data may also return 404.`,
+      `${subject} not found. Check the region, first name, and surname. Forever profiles may not appear until the character reaches level 10 and logs out. Private profiles and unpublished activity data may also return 404.`,
     );
   }
   if (status === 429) {

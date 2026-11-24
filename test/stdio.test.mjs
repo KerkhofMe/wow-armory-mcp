@@ -6,28 +6,24 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 
-const endpoint = '/profile/wow/character/draenor/%C3%A9owyn';
-const lookup = { region: 'eu', realm: ' Draenor ', name: ' E\u0301owyn ' };
-const normalized = { region: 'eu', realm: 'draenor', name: 'éowyn' };
+const basePath = '/profile/wow/character';
+const endpoint = `${basePath}/%C3%A9owyn-%C3%BClf`;
+const lookup = { region: 'eu', name: ' E\u0301owyn ', surname: ' U\u0308lf ' };
+const normalized = { region: 'eu', name: 'éowyn', surname: 'ülf' };
 const tools = {
   summary: 'wow_character_summary',
   equipment: 'wow_character_equipment',
   achievements: 'wow_character_achievements',
   collection: 'wow_character_collection',
-  mythic: 'wow_character_mythic_plus',
+  talents: 'wow_character_talents',
   pvp: 'wow_character_pvp',
 };
 
-const character = { id: 42, name: 'Éowyn', level: 80, realm: { id: 1, name: 'Draenor', slug: 'draenor' } };
-const run = {
-  dungeon: { id: 8, name: 'Example Dungeon' },
-  keystone_level: 12,
-  is_completed_within_time: true,
-  members: [{ character }],
-};
+const character = { id: 42, name: 'Éowyn', surname: 'Ülf', level: 60, ruleset: { id: 2, name: 'Normal' } };
+const links = path => ({ self: { href: `https://eu.api.blizzard.com${path}?namespace=profile-forever-eu` } });
 const fixtures = new Map([
-  ['', { ...character, character_class: { id: 1, name: 'Warrior' }, equipped_item_level: 650, _links: {} }],
-  ['/equipment', { equipped_items: [{ item: { id: 1 }, slot: { type: 'HEAD', name: 'Head' }, name: 'Helm', level: { value: 650 } }] }],
+  ['', { ...character, character_class: { id: 1, name: 'Warrior' }, equipped_item_level: 58, _links: links(endpoint) }],
+  ['/equipment', { equipped_items: [{ item: { id: 1 }, slot: { type: 'HEAD', name: 'Head' }, name: 'Helm', level: { value: 58 } }] }],
   ['/achievements', {
     total_points: 10,
     total_quantity: 2,
@@ -38,25 +34,39 @@ const fixtures = new Map([
     ],
   }],
   ['/collections/mounts', {
+    _links: links(`${endpoint}/collections/mounts`),
     mounts: Array.from({ length: 225 }, (_, index) => ({ mount: { id: index + 1, name: `Mount ${index + 1}` } })),
   }],
   ['/collections/pets', {
+    _links: links(`${endpoint}/collections/pets`),
     pets: [{ id: 12, species: { id: 4, name: 'Cat' }, name: 'Croissant', level: 25 }],
   }],
-  ['/mythic-keystone-profile', {
-    character, current_mythic_rating: { rating: 2500 },
-    seasons: [{ id: 1 }, { id: 2 }],
-    current_period: { period: { id: 17 }, best_runs: [run] },
-  }],
-  ['/mythic-keystone-profile/season/2', {
-    character, season: { id: 2 }, mythic_rating: { rating: 2600 }, best_runs: [run, { ...run, keystone_level: 13 }],
+  ['/specializations', {
+    character,
+    specialization_groups: [
+      {
+        is_active: true,
+        specializations: [{
+          specialization: { id: 71, name: 'Arms' },
+          spent_points: 5,
+          talents: [{ talent: { id: 99, name: 'Improved Strike' }, talent_rank: 5, spell_tooltip: { description: 'Details' } }],
+        }],
+      },
+      { is_active: false },
+    ],
   }],
   ['/pvp-summary', {
-    character, honor_level: 35, honorable_kills: 42,
-    brackets: [{ href: `https://eu.api.blizzard.com${endpoint}/pvp-bracket/2v2?namespace=profile-eu` }],
+    character, pvp_rank: 2, honorable_kills: 42,
+    pvp_map_statistics: [{
+      world_map: { id: 1, name: 'Warsong Gulch' },
+      match_statistics: { played: 25, won: 15, lost: 10 },
+    }],
   }],
-  ['/pvp-bracket/2v2', { character, rating: 1900, season_match_statistics: { played: 25, won: 15, lost: 10 } }],
-]);
+].map(([suffix, fixture]) => [endpoint + suffix, fixture]));
+const emptyPets = `${basePath}/new-hero/collections/pets`;
+fixtures.set(emptyPets, { _links: links(emptyPets) });
+const invalidPets = `${basePath}/bad-shape/collections/pets`;
+fixtures.set(invalidPets, {});
 
 async function connect(t, options = {}) {
   const requests = [];
@@ -67,17 +77,18 @@ async function connect(t, options = {}) {
     requests.push({
       method: request.method, host: request.headers['x-test-upstream'],
       auth: request.headers.authorization, path: url.pathname, query: url.search, body,
+      namespace: request.headers['battlenet-namespace'],
       contentType: request.headers['content-type'],
     });
     response.setHeader('content-type', 'application/json');
     if (url.pathname === '/token') {
       return response.end(JSON.stringify({ access_token: 'mock-token', token_type: 'bearer', expires_in: 3600 }));
     }
-    if (!url.pathname.startsWith(endpoint) || !fixtures.has(url.pathname.slice(endpoint.length))) {
+    if (!fixtures.has(url.pathname)) {
       response.statusCode = 404;
       return response.end('{"detail":"upstream-only information"}');
     }
-    return response.end(JSON.stringify(fixtures.get(url.pathname.slice(endpoint.length))));
+    return response.end(JSON.stringify(fixtures.get(url.pathname)));
   });
   mock.listen(0, '127.0.0.1');
   t.after(() => new Promise(resolve => mock.close(resolve)));
@@ -123,22 +134,28 @@ test('SDK client discovers and calls all tools over real stdio with a mock Battl
   const listed = (await client.listTools()).tools;
   assert.deepEqual(listed.map(tool => tool.name).sort(), Object.values(tools).sort());
   assert.ok(listed.every(tool => tool.annotations.readOnlyHint && tool.description));
-  assert.deepEqual(listed.find(tool => tool.name === tools.summary).inputSchema.required, ['region', 'realm', 'name']);
+  assert.deepEqual(listed.find(tool => tool.name === tools.summary).inputSchema.required, ['region', 'name', 'surname']);
   assert.equal(requests.length, 0, 'discovery should not make upstream calls');
 
-  const invalid = await call(client, tools.summary, { ...lookup, name: '../other' });
+  const invalid = await call(client, tools.summary, { ...lookup, surname: '../other' });
   assert.equal(invalid.isError, true);
   assert.match(invalid.content[0].text, /character name/i);
+  const retailInput = await call(client, tools.summary, { region: 'eu', realm: 'draenor', name: 'Example' });
+  assert.equal(retailInput.isError, true);
+  assert.match(retailInput.content[0].text, /surname/i);
+  const unexpectedRealm = await call(client, tools.summary, { ...lookup, realm: 'draenor' });
+  assert.equal(unexpectedRealm.isError, true);
+  assert.match(unexpectedRealm.content[0].text, /realm/i);
   const oversized = await call(client, tools.collection, { ...lookup, collection: 'mounts', limit: 101 });
   assert.equal(oversized.isError, true);
   assert.equal(requests.length, 0, 'invalid inputs should not make upstream calls');
 
   const summary = await data(client, tools.summary);
   assert.deepEqual(summary, {
-    ...character, lookup: normalized, character_class: { id: 1, name: 'Warrior' }, equipped_item_level: 650,
+    ...character, lookup: normalized, character_class: { id: 1, name: 'Warrior' }, equipped_item_level: 58,
   });
   const equipment = await data(client, tools.equipment);
-  assert.equal(equipment.equipped_items[0].level.value, 650);
+  assert.equal(equipment.equipped_items[0].level.value, 58);
 
   const achievements = await data(client, tools.achievements, { search: 'EXPLORE', limit: 1 });
   assert.equal(achievements.total_points, 10);
@@ -156,43 +173,51 @@ test('SDK client discovers and calls all tools over real stdio with a mock Battl
   assert.equal(mounts.next_offset, 200);
   const pets = await data(client, tools.collection, { collection: 'pets', search: 'CROISSANT' });
   assert.equal(pets.items[0].species.name, 'Cat');
+  const empty = await data(client, tools.collection, { name: 'New', surname: 'Hero', collection: 'pets' });
+  assert.deepEqual(empty.items, []);
+  assert.equal(empty.total, 0);
+  const malformed = await call(client, tools.collection, { ...lookup, name: 'Bad', surname: 'Shape', collection: 'pets' });
+  assert.equal(malformed.isError, true);
+  assert.match(malformed.content[0].text, /^INVALID_RESPONSE:/);
 
-  const mythic = await data(client, tools.mythic);
-  assert.equal(mythic.current_mythic_rating.rating, 2500);
-  assert.deepEqual(mythic.seasons, [{ id: 1 }, { id: 2 }]);
-  assert.equal(mythic.best_runs.items[0].keystone_level, 12);
-  assert.ok(!('members' in mythic.best_runs.items[0]));
-  const season = await data(client, tools.mythic, { season_id: 2, offset: 1 });
-  assert.equal(season.mythic_rating.rating, 2600);
-  assert.equal(season.best_runs.items[0].keystone_level, 13);
+  const talents = await data(client, tools.talents);
+  assert.deepEqual(talents.specialization_groups, [
+    {
+      is_active: true,
+      specializations: [{
+        specialization: { id: 71, name: 'Arms' }, spent_points: 5,
+        talents: [{ talent: { id: 99, name: 'Improved Strike' }, talent_rank: 5 }],
+      }],
+    },
+    { is_active: false, specializations: [] },
+  ]);
 
   const pvp = await data(client, tools.pvp);
-  assert.equal(pvp.honor_level, 35);
-  assert.deepEqual(pvp.brackets, ['2v2']);
-  const bracket = await data(client, tools.pvp, { bracket: '2v2' });
-  assert.equal(bracket.rating, 1900);
-  assert.equal(bracket.season_match_statistics.won, 15);
+  assert.equal(pvp.honorable_kills, 42);
+  assert.equal(pvp.pvp_rank, 2);
+  assert.equal(pvp.pvp_map_statistics[0].match_statistics.won, 15);
 
-  const missing = await call(client, tools.summary, { ...lookup, name: 'Unknown' });
+  const missing = await call(client, tools.summary, { ...lookup, name: 'Unknown', surname: 'Hero' });
   assert.equal(missing.isError, true);
-  assert.match(missing.content[0].text, /NOT_FOUND:.*realm slug/);
+  assert.match(missing.content[0].text, /NOT_FOUND:.*first name, and surname.*level 10/);
   assert.doesNotMatch(missing.content[0].text, /upstream-only/);
 
   assert.deepEqual(requests[0], {
     method: 'POST', host: 'https://oauth.battle.net', auth: `Basic ${Buffer.from('test-client:test-secret').toString('base64')}`,
-    path: '/token', query: '', body: 'grant_type=client_credentials',
+    path: '/token', query: '', body: 'grant_type=client_credentials', namespace: undefined,
     contentType: 'application/x-www-form-urlencoded;charset=UTF-8',
   });
   assert.deepEqual(requests.slice(1).map(request => request.path), [
     endpoint, ...[
       '/equipment', '/achievements', '/achievements', '/collections/mounts', '/collections/pets',
-      '/mythic-keystone-profile', '/mythic-keystone-profile/season/2', '/pvp-summary', '/pvp-bracket/2v2',
     ].map(suffix => endpoint + suffix),
-    '/profile/wow/character/draenor/unknown',
+    emptyPets, invalidPets, `${endpoint}/specializations`, `${endpoint}/pvp-summary`,
+    `${basePath}/unknown-hero`,
   ]);
   assert.ok(requests.slice(1).every(request => request.method === 'GET'
     && request.host === 'https://eu.api.blizzard.com'
-    && request.query === '?namespace=profile-eu&locale=en_GB'
+    && request.query === '?locale=en_GB'
+    && request.namespace === 'profile-forever-eu'
     && request.auth === 'Bearer mock-token'));
 });
 

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { BlizzardClient } from '../dist/blizzard.js';
 
 const env = { BLIZZARD_CLIENT_ID: 'test-client', BLIZZARD_CLIENT_SECRET: 'test-secret' };
-const character = { region: 'us', realm: 'area-52', name: 'álara' };
+const character = { region: 'us', name: 'álara', surname: 'windward' };
 const token = (id, expires_in = 100) => Response.json({
   access_token: `token-${id}`,
   expires_in,
@@ -18,23 +18,23 @@ test('OAuth refresh is shared and the token is renewed before expiry', async () 
     if (url.hostname === 'oauth.battle.net') {
       return token(++oauthCalls);
     }
-    requests.push([url.toString(), init.headers.Authorization]);
+    requests.push([url.toString(), init.headers.Authorization, init.headers['Battlenet-Namespace']]);
     return Response.json({ id: 1 });
   }, () => time);
 
   await Promise.all([
     blizzard.character(character),
-    blizzard.character({ region: 'kr', realm: '아즈샤라', name: '별빛' }),
-    blizzard.character({ region: 'tw', realm: '世界之樹', name: '星光' }),
+    blizzard.character({ region: 'kr', name: '별빛', surname: '하늘' }),
+    blizzard.character({ region: 'tw', name: '星光', surname: '明月' }),
   ]);
   assert.equal(oauthCalls, 1);
-  assert.deepEqual(requests.map(([url, auth]) => {
+  assert.deepEqual(requests.map(([url, auth, namespace]) => {
     const parsed = new URL(url);
-    return [parsed.hostname, decodeURIComponent(parsed.pathname), parsed.search, auth];
+    return [parsed.hostname, decodeURIComponent(parsed.pathname), parsed.search, auth, namespace];
   }), [
-    ['us.api.blizzard.com', '/profile/wow/character/area-52/álara', '?namespace=profile-us&locale=en_US', 'Bearer token-1'],
-    ['kr.api.blizzard.com', '/profile/wow/character/아즈샤라/별빛', '?namespace=profile-kr&locale=ko_KR', 'Bearer token-1'],
-    ['tw.api.blizzard.com', '/profile/wow/character/世界之樹/星光', '?namespace=profile-tw&locale=zh_TW', 'Bearer token-1'],
+    ['us.api.blizzard.com', '/profile/wow/character/álara-windward', '?locale=en_US', 'Bearer token-1', 'profile-forever-us'],
+    ['kr.api.blizzard.com', '/profile/wow/character/별빛-하늘', '?locale=ko_KR', 'Bearer token-1', 'profile-forever-kr'],
+    ['tw.api.blizzard.com', '/profile/wow/character/星光-明月', '?locale=zh_TW', 'Bearer token-1', 'profile-forever-tw'],
   ]);
 
   time = 89_999;

@@ -2,7 +2,7 @@
   "name": "wow-armory-mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "Read-only MCP server for public World of Warcraft Retail character profiles",
+  "description": "Read-only MCP server for public World of Warcraft: Forever character profiles",
   "type": "module",
   "engines": {
     "node": ">=22"
